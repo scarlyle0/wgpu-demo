@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use winit::{
     application::ApplicationHandler,
@@ -17,6 +18,9 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     render_pipeline: wgpu::RenderPipeline,
+    // FPS
+    last_frame: Instant,
+    fps: f32,
 }
 
 impl State {
@@ -137,6 +141,8 @@ impl State {
             is_surface_configured: false,
             render_pipeline,
             window,
+            last_frame: Instant::now(),
+            fps: 0.0,
         })
     }
 
@@ -149,7 +155,15 @@ impl State {
         }
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        // Calculate FPS
+        let now = Instant::now();
+        let delta = now.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        // Smooth it slightly so it doesn't flicker every frame
+        self.fps = self.fps * 0.9 + (1.0 / delta) * 0.1;
+        self.window.set_title(&format!("voxel demo | FPS: {:.0}", self.fps));
+    }
 
     pub fn render(&mut self) -> anyhow::Result<()>{
         self.window.request_redraw();
