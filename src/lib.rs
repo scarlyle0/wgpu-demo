@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
+use wgpu::util::DeviceExt;
 
 use winit::{
     application::ApplicationHandler,
@@ -18,9 +19,11 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
     // FPS
     last_frame: Instant,
     fps: f32,
+    num_vertices:u32,
 }
 
 impl State {
@@ -98,7 +101,9 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"), // function entrypoint for vertex shader
-                buffers: &[], // type of vertices we want to pass to vertex shader
+                buffers: &[
+                    Vertex::desc(),
+                ], // type of vertices we want to pass to vertex shader
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState { // optional
@@ -110,28 +115,39 @@ impl State {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList, // Every 3 vertices = 1 triangle
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw, 
-            cull_mode: Some(wgpu::Face::Back),
-            // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-            polygon_mode: wgpu::PolygonMode::Fill,
-            // Requires Features::DEPTH_CLIP_CONTROL
-            unclipped_depth: false,
-            // Requires Features::CONSERVATIVE_RASTERIZATION
-            conservative: false,
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState {
-            count: 1, // samples used for multisampling
-            mask: !0, // all samples
-            alpha_to_coverage_enabled: false, 
-        },
-        multiview_mask: None,
-        cache: None,
-    });
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList, // Every 3 vertices = 1 triangle
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw, 
+                cull_mode: Some(wgpu::Face::Back),
+                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // Requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1, // samples used for multisampling
+                mask: !0, // all samples
+                alpha_to_coverage_enabled: false, 
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Vertex buffer
+        let vertex_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+
+        let num_vertices = VERTICES.len() as u32;
 
         Ok(Self {
             surface,
@@ -141,8 +157,10 @@ impl State {
             is_surface_configured: false,
             render_pipeline,
             window,
+            vertex_buffer,
             last_frame: Instant::now(),
             fps: 0.0,
+            num_vertices,
         })
     }
 
@@ -227,7 +245,8 @@ impl State {
                 multiview_mask: None,
             });
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..self.num_vertices, 0..1);
         }
 
         // submit will accept anything that implements IntoIter
@@ -246,6 +265,7 @@ impl State {
     }
 }
 
+// App struct
 pub struct App {
     state: Option<State>,
 }
@@ -304,6 +324,44 @@ impl ApplicationHandler<State> for App {
     }
 }
 
+
+// Vertex buffer struct
+#[repr(C)]
+#[derive(Copy, Clone, Debug,  bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [0.0, 0.5, 0.0], color: [1.0, 0.0, 0.0] },
+    Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+    Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+];
+
+// Tell gpu how to parse vertex data in buffer, here we split position / color into 12 bytes each 24 total.
+impl Vertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                }
+            ]
+        }
+    }
+}
+
+// run loop
 pub fn run() -> anyhow::Result<()> {
     env_logger::init();
 
